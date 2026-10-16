@@ -135,7 +135,7 @@ Die exakten Namen deiner Kalender liefert das Tool `calendar_list_calendars`.
 | Tool | Zweck | Schreibend? |
 |---|---|---|
 | `calendar_list_calendars` | Alle Kalender mit Namen und Beschreibbarkeit | – |
-| `calendar_list_events` | Termine in einem Zeitraum, optional nach Kalender/Titel gefiltert | – |
+| `calendar_list_events` | Termine in einem Zeitraum, optional nach Kalender/Titel gefiltert; **Serientermine werden aufgelöst** (jedes Vorkommen im Zeitraum wird einzeln geliefert) | – |
 | `calendar_create_event` | Termin anlegen | ✏️ |
 | `calendar_update_event` | Felder eines Termins ändern | ✏️ |
 | `calendar_delete_event` | Termin löschen (endgültig) | 🗑️ |
@@ -193,12 +193,24 @@ npx @modelcontextprotocol/inspector node dist/index.js
 
 Das öffnet eine Weboberfläche. Empfohlen: zuerst nur lesende Tools testen (`*_list_*`), dann schreibende.
 
+Die Auflösung von Serienterminen (`src/services/recurrence.ts`) hat automatische Tests, die ohne macOS laufen:
+
+```bash
+npm test
+```
+
 ## Bekannte Einschränkungen
 
 - **Nur macOS.** Auf anderen Systemen beendet sich der Server sofort mit einer Meldung.
 - **Kalender:** Gefiltert wird nach der *Startzeit*. Ein mehrtägiger Termin, der vor `start_date` beginnt,
   wird nicht gefunden – dann `start_date` früher wählen. Sehr große Kalender sind langsam
   (Calendar.app braucht ca. 5 ms pro Termin) → siehe `APPLE_MCP_DEFAULT_CALENDARS`.
+- **Serientermine:** Calendar.app liefert per Skript nur den *ersten* Termin einer Serie. Der Server wertet deshalb
+  die Wiederholungsregel (RRULE) selbst aus – unterstützt werden täglich, wöchentlich, monatlich und jährlich
+  inkl. `INTERVAL`, `COUNT`, `UNTIL`, `BYDAY` (auch „2. Dienstag“ / „letzter Freitag“), `BYMONTHDAY`, `BYMONTH`,
+  `BYSETPOS` sowie gelöschte Einzeltermine einer Serie. Nicht unterstützte Regeln (z. B. stündlich) werden als
+  „Warnings“ in der Antwort gemeldet. Einzeln verschobene Vorkommen einer Serie können doppelt oder an der
+  alten Stelle erscheinen. `calendar_update_event` / `calendar_delete_event` wirken immer auf die **ganze Serie**.
 - **Notizen:** Es gibt kein separates Titelfeld; der Titel ist die erste Zeile. `notes_update_note` ersetzt den
   gesamten Text. Formatierungen (fett, Listen, Bilder) gehen beim Schreiben verloren, Text wird als einfache
   Absätze gespeichert.

@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc && shx chmod +x dist/index.js",
     "start": "node dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "test": "tsc && TZ=Europe/Berlin node --test test/*.test.mjs"
   },
   "engines": {
     "node": ">=18"

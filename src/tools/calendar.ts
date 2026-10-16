@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { runJXAJson, toJXALiteral } from "../services/jxa.js";
+import { expandRecurrence } from "../services/recurrence.js";
 import { CalendarEvent, CalendarInfo, truncate } from "../types.js";
 import { CHARACTER_LIMIT, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT } from "../constants.js";
 
@@ -89,6 +90,9 @@ Returns: JSON array of { name: string, writable: boolean }.`,
 Note: events are matched by their START time falling in the range. A multi-day event that starts before start_date but
 overlaps the range will NOT be included - widen start_date if you need those too.
 
+Recurring events (daily/weekly/monthly/yearly series) are expanded: every occurrence starting in the range is returned
+as its own entry with "recurring": true, even if the series began long before start_date. All occurrences of a series
+share the same "id" - calendar_update_event / calendar_delete_event on that id affects the WHOLE series.
 Args:
   - start_date (string): inclusive range start, ISO 8601
   - end_date (string): exclusive range end, ISO 8601
@@ -97,7 +101,8 @@ Args:
   - search_text (string, optional): case-insensitive substring match on the event title
   - limit (number, optional): max results, default ${DEFAULT_LIST_LIMIT}
 
-Returns: JSON array of events with { id, calendar, title, startDate, endDate, allDay, location, notes }.
+Returns: JSON array of events with { id, calendar, title, startDate, endDate, allDay, location, notes, recurring }.
+Unsupported recurrence rules are reported in a trailing "Warnings:" section instead of being dropped silently.
 The "id" is the event's stable uid - pass it to calendar_update_event / calendar_delete_event.
 
 Error Handling:
@@ -117,6 +122,7 @@ Error Handling:
           const defaults = ${toJXALiteral(DEFAULT_CALENDARS)};
           const searchText = params.search_text ? params.search_text.toLowerCase() : null;
           const limit = params.limit;
+          const expandRecurrence = ${expandRecurrence.toString()};
 
           const cals = app.calendars().filter(function (c) {
             const name = c.name();
@@ -128,12 +134,20 @@ Error Handling:
           // Performance: events.whose({startDate...}) makes Calendar.app scan
           // every event and took ~250s here. Reading ONE property for all
           // events of a calendar in bulk (~5ms/event) is ~8x faster, so we
-          // fetch all start dates, pick the matching indexes in the script and
-          // read the remaining properties for the hits only. Reading a single
-          // event by index costs ~1s, a bulk read ~5ms per event in the
-          // calendar, so with few hits we read per event, with many in bulk.
+          // fetch all start dates (and recurrence rules) in bulk, pick the
+          // matching occurrences in the script and read the remaining
+          // properties for the hits only. Reading a single event by index
+          // costs ~1s, a bulk read ~5ms per event in the calendar, so with few
+          // hits we read per event, with many in bulk.
+          //
+          // Recurring events: Calendar.app only returns the FIRST event of a
+          // series (its startDate lies wherever the series began), never the
+          // individual occurrences. So for every event that has a recurrence
+          // rule we expand the rule ourselves and report each occurrence that
+          // starts inside the range (minus the series' excluded dates).
           const events = [];
-          function pushEvent(calName, title, uid, start, end, allDay, location, notes) {
+          const warnings = [];
+          function pushEvent(calName, title, uid, start, end, allDay, location, notes, recurring) {
             if (searchText && title.toLowerCase().indexOf(searchText) === -1) return;
             events.push({
               id: uid,
@@ -143,21 +157,57 @@ Error Handling:
               endDate: end.toISOString(),
               allDay: allDay,
               location: location || null,
-              notes: notes || null
+              notes: notes || null,
+              recurring: recurring
             });
           }
           for (const cal of cals) {
+            const calName = cal.name();
             const starts = cal.events.startDate();
+            let rules = null;
+            try {
+              rules = cal.events.recurrence();
+            } catch (e) {
+              warnings.push("Could not read recurrence rules of calendar '" + calName + "': recurring events may be missing. " + e);
+            }
+
+            // hits: { i: event index, start: occurrence start, recurring: bool }
             const hits = [];
             for (let i = 0; i < starts.length; i++) {
-              if (starts[i] >= rangeStart && starts[i] < rangeEnd) hits.push(i);
+              const rule = rules && rules[i] ? String(rules[i]) : "";
+              if (rule === "") {
+                if (starts[i] >= rangeStart && starts[i] < rangeEnd) hits.push({ i: i, start: starts[i], recurring: false });
+                continue;
+              }
+              if (starts[i] >= rangeEnd) continue;
+              const expanded = expandRecurrence(rule, starts[i], rangeStart, rangeEnd, 500);
+              if (expanded.unsupported) {
+                warnings.push("Unsupported recurrence rule '" + rule + "' (" + expanded.unsupported + "); only the first occurrence of that series is listed.");
+                if (starts[i] >= rangeStart) hits.push({ i: i, start: starts[i], recurring: true });
+                continue;
+              }
+              if (expanded.dates.length === 0) continue;
+              let excluded = [];
+              try {
+                excluded = cal.events[i].excludedDates().map(function (d) { return d.getTime(); });
+              } catch (e) {
+                // no excluded dates readable - keep every occurrence
+              }
+              for (const d of expanded.dates) {
+                const t = d.getTime();
+                const isExcluded = excluded.some(function (x) { return Math.abs(x - t) < 60000; });
+                if (!isExcluded) hits.push({ i: i, start: d, recurring: true });
+              }
             }
             if (hits.length === 0) continue;
-            const calName = cal.name();
-            if (hits.length * 34 < starts.length) {
-              for (const i of hits) {
-                const ev = cal.events[i];
-                pushEvent(calName, ev.summary() || "", ev.uid(), starts[i], ev.endDate(), ev.alldayEvent(), ev.location(), ev.description());
+
+            const distinct = {};
+            for (const h of hits) distinct[h.i] = true;
+            if (Object.keys(distinct).length * 34 < starts.length) {
+              for (const h of hits) {
+                const ev = cal.events[h.i];
+                const duration = ev.endDate().getTime() - starts[h.i].getTime();
+                pushEvent(calName, ev.summary() || "", ev.uid(), h.start, new Date(h.start.getTime() + duration), ev.alldayEvent(), ev.location(), ev.description(), h.recurring);
               }
             } else {
               const titles = cal.events.summary();
@@ -166,22 +216,24 @@ Error Handling:
               const allDays = cal.events.alldayEvent();
               const locations = cal.events.location();
               const descriptions = cal.events.description();
-              for (const i of hits) {
-                pushEvent(calName, titles[i] || "", uids[i], starts[i], ends[i], allDays[i], locations[i], descriptions[i]);
+              for (const h of hits) {
+                const duration = ends[h.i].getTime() - starts[h.i].getTime();
+                pushEvent(calName, titles[h.i] || "", uids[h.i], h.start, new Date(h.start.getTime() + duration), allDays[h.i], locations[h.i], descriptions[h.i], h.recurring);
               }
             }
           }
           events.sort(function (a, b) { return a.startDate < b.startDate ? -1 : 1; });
-          return JSON.stringify(events.slice(0, limit));
+          return JSON.stringify({ events: events.slice(0, limit), warnings: warnings });
         })()
       `;
-      const events = await runJXAJson<CalendarEvent[]>(script, 120_000);
+      const { events, warnings } = await runJXAJson<{ events: CalendarEvent[]; warnings: string[] }>(script, 120_000);
+      const warningText = warnings.length > 0 ? `\n\nWarnings:\n- ${warnings.join("\n- ")}` : "";
       if (events.length === 0) {
-        return textContent(`No events found between ${params.start_date} and ${params.end_date}.`);
+        return textContent(`No events found between ${params.start_date} and ${params.end_date}.${warningText}`);
       }
       return {
-        ...textContent(truncate(JSON.stringify(events, null, 2), CHARACTER_LIMIT)),
-        structuredContent: { events }
+        ...textContent(truncate(JSON.stringify(events, null, 2), CHARACTER_LIMIT) + warningText),
+        structuredContent: { events, warnings }
       };
     }
   );
@@ -327,7 +379,8 @@ Returns: JSON of the updated event, or "Error: Event not found" if event_id does
     "calendar_delete_event",
     {
       title: "Delete Calendar Event",
-      description: `Permanently deletes one event. This cannot be undone.
+      description: `Permanently deletes one event. This cannot be undone. For a recurring event this deletes the ENTIRE series
+(all occurrences share one id), not just a single occurrence.
 
 Args:
   - calendar_name (string): calendar the event is in

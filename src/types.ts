@@ -12,6 +12,7 @@ export interface CalendarEvent {
   allDay: boolean;
   location: string | null;
   notes: string | null;
+  recurring?: boolean; // true for occurrences of a recurring series
 }
 
 export interface NoteFolderInfo {
