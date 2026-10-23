@@ -8,7 +8,7 @@ function textContent(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
-export function registerRemindersTools(server: McpServer): void {
+export function registerRemindersTools(server: Pick<McpServer, "registerTool">): void {
   server.registerTool(
     "reminders_list_lists",
     {

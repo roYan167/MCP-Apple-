@@ -16,7 +16,7 @@ function textContent(text: string) {
 // plain JS, rather than relying on Mail's own `whose()` predicate on
 // messages. This trades a bit of raw speed for predictable behavior.
 
-export function registerMailTools(server: McpServer): void {
+export function registerMailTools(server: Pick<McpServer, "registerTool">): void {
   // ---------------------------------------------------------------------
   // mail_list_accounts
   // ---------------------------------------------------------------------

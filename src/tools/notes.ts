@@ -13,7 +13,7 @@ function textContent(text: string) {
 // tool below therefore treats the body's first line as the title, and says
 // so in its description, instead of pretending a separate title exists.
 
-export function registerNotesTools(server: McpServer): void {
+export function registerNotesTools(server: Pick<McpServer, "registerTool">): void {
   server.registerTool(
     "notes_list_folders",
     {

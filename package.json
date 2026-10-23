@@ -11,16 +11,18 @@
     "build": "tsc && shx chmod +x dist/index.js",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "tsc && TZ=Europe/Berlin node --test test/*.test.mjs"
+    "test": "tsc && TZ=Europe/Berlin node --test test/*.test.mjs",
+    "start:http": "node dist/index.js --transport=http"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "os": [
     "darwin"
   ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "jose": "^6.2.13",
     "zod": "^3.23.8"
   },
   "devDependencies": {
