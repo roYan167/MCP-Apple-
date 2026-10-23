@@ -1,3 +1,5 @@
+> **Claude Desktop + ChatGPT:** Der bisherige stdio-Start bleibt erhalten. Optional gibt es jetzt Streamable HTTP mit Zugriffsschutz sowie einen geschützten stdio-Modus für private Tunnel. Einrichtung, OAuth, Schreibfreigaben und macOS-Berechtigungen: [ChatGPT-Anleitung](docs/chatgpt.md). Voraussetzung: Node.js 22 oder neuer.
+
 # Apple MCP Server (Kalender · Notizen · Erinnerungen · Mail)
 
 Ein lokaler [MCP](https://modelcontextprotocol.io)-Server, der KI-Assistenten wie Claude Desktop Zugriff auf die
@@ -40,7 +42,7 @@ Claude Desktop  ──stdio──▶  dieser MCP-Server (Node.js)  ──osascri
 | Was | Version / Hinweis |
 |---|---|
 | macOS | 13 (Ventura) oder neuer empfohlen. **Läuft nur auf macOS.** |
-| Node.js | 18 oder neuer (`node --version`). Installation z. B. per `brew install node` |
+| Node.js | 22 oder neuer (`node --version`). Installation z. B. per `brew install node` |
 | Claude Desktop | aktuelle Version für Mac |
 | Freier Speicherplatz | ein paar hundert MB für `node_modules` |
 

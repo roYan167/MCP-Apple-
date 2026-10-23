@@ -20,7 +20,7 @@ function textContent(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
 
-export function registerCalendarTools(server: McpServer): void {
+export function registerCalendarTools(server: Pick<McpServer, "registerTool">): void {
   server.registerTool(
     "calendar_list_calendars",
     {
